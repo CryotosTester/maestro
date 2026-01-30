@@ -17,16 +17,18 @@ jobs:
       MAESTRO_DRIVER_STARTUP_TIMEOUT: 60000
 
     steps:
+      # 1️⃣ Checkout code
       - name: Checkout code
         uses: actions/checkout@v3
 
+      # 2️⃣ Setup Java
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: 11
 
-      # Install Android SDK cmdline-tools and system images
+      # 3️⃣ Install Android SDK cmdline-tools and system images
       - name: Install Android SDK
         run: |
           mkdir -p $ANDROID_HOME/cmdline-tools
@@ -35,36 +37,44 @@ jobs:
           mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
 
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
+          export ANDROID_SDK_ROOT=$ANDROID_HOME
 
           # Accept licenses
-          yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses
+          yes | sdkmanager --licenses
 
           # Install required packages
-          sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "emulator" "platforms;android-36" "system-images;android-36;google_apis_playstore;x86_64"
+          sdkmanager "platform-tools" "emulator" "platforms;android-36" "system-images;android-36;google_apis_playstore;x86_64"
 
-      # Create and boot emulator
+      # 4️⃣ Create and boot emulator
       - name: Create and boot emulator
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
-          
-          echo "no" | avdmanager --sdk_root=$ANDROID_HOME create avd -n $AVD_NAME -k "system-images;android-36;google_apis_playstore;x86_64" --force
-          
+          export ANDROID_SDK_ROOT=$ANDROID_HOME
+
+          # Create AVD
+          echo "no" | avdmanager create avd -n $AVD_NAME -k "system-images;android-36;google_apis_playstore;x86_64" --force
+
+          # Boot emulator headless
           $ANDROID_HOME/emulator/emulator -avd $AVD_NAME -no-window -no-audio -gpu swiftshader_indirect &
+          
+          # Wait for device to be ready
           $ANDROID_HOME/platform-tools/adb wait-for-device
+          
+          # Unlock the emulator screen
           $ANDROID_HOME/platform-tools/adb shell input keyevent 82
 
-      # Install Maestro CLI
+      # 5️⃣ Install Maestro CLI
       - name: Install Maestro
         run: curl -Ls https://get.maestro.mobile.dev | bash
 
-      # Install APK and run Maestro tests
+      # 6️⃣ Install APK and run Maestro tests
       - name: Run Maestro tests
         run: |
           export PATH=$ANDROID_HOME/platform-tools:$PATH
           $ANDROID_HOME/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
           ./scripts/run_maestro_simple.sh
 
-      # Stop emulator
+      # 7️⃣ Stop emulator
       - name: Stop emulator
         if: always()
         run: |
