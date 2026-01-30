@@ -15,15 +15,15 @@ jobs:
 
     env:
       AVD_NAME: Pixel_8
-      ANDROID_API_LEVEL: 33
-      ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+      ANDROID_API_LEVEL: 36
+      ANDROID_SDK_ROOT: ${{ runner.temp }}\android-sdk
 
     steps:
       # Step 1: Checkout code
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Step 2: Setup JDK
+      # Step 2: Setup Java
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
@@ -32,52 +32,53 @@ jobs:
 
       # Step 3: Install Android SDK command-line tools + emulator
       - name: Install Android SDK & System Images
-        shell: bash
+        shell: pwsh
         run: |
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          curl -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-win-9477386_latest.zip
-          unzip -q cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
-          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator:$PATH"
+          mkdir -Force $Env:ANDROID_SDK_ROOT\cmdline-tools
+          Invoke-WebRequest https://dl.google.com/android/repository/commandlinetools-win-9477386_latest.zip -OutFile cmdline-tools.zip
+          Expand-Archive cmdline-tools.zip -DestinationPath $Env:ANDROID_SDK_ROOT\cmdline-tools
+          Rename-Item $Env:ANDROID_SDK_ROOT\cmdline-tools\cmdline-tools $Env:ANDROID_SDK_ROOT\cmdline-tools\latest
 
-          yes | sdkmanager --sdk_root=$ANDROID_SDK_ROOT --licenses
-          sdkmanager --sdk_root=$ANDROID_SDK_ROOT "platform-tools" "emulator" "platforms;android-${ANDROID_API_LEVEL}" "system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64"
+          # Update PATH for this step
+          $Env:PATH="$Env:ANDROID_SDK_ROOT\cmdline-tools\latest;$Env:ANDROID_SDK_ROOT\emulator;$Env:ANDROID_SDK_ROOT\platform-tools;$Env:PATH"
+
+          # Accept licenses
+          yes | sdkmanager.bat --licenses
+
+          # Install required packages
+          sdkmanager.bat "platform-tools" "emulator" "platforms;android-${Env:ANDROID_API_LEVEL}" "system-images;android-${Env:ANDROID_API_LEVEL};google_apis_playstore;x86_64"
 
       # Step 4: Create and start emulator
       - name: Create and launch emulator
-        shell: bash
+        shell: pwsh
         run: |
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-          avdmanager create avd -n "$AVD_NAME" -k "system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64" --force
-          
-          # Boot emulator with WHPX acceleration
-          emulator -avd "$AVD_NAME" -no-window -no-audio -gpu host -accel on &
-          
-          adb wait-for-device
-          
-          # Wait for full boot
-          BOOT_COMPLETED=""
-          while [ "$BOOT_COMPLETED" != "1" ]; do
-            sleep 5
-            BOOT_COMPLETED=$(adb shell getprop sys.boot_completed | tr -d '\r')
-          done
-          
+          $Env:PATH="$Env:ANDROID_SDK_ROOT\cmdline-tools\latest;$Env:ANDROID_SDK_ROOT\emulator;$Env:ANDROID_SDK_ROOT\platform-tools;$Env:PATH"
+          avdmanager.bat create avd -n "$Env:AVD_NAME" -k "system-images;android-${Env:ANDROID_API_LEVEL};google_apis_playstore;x86_64" --force
+
+          # Start emulator in background
+          Start-Process -NoNewWindow -FilePath "$Env:ANDROID_SDK_ROOT\emulator\emulator.exe" -ArgumentList "-avd $Env:AVD_NAME -no-window -no-audio -gpu host -accel on"
+
+          # Wait for device boot
+          do {
+            Start-Sleep -Seconds 5
+            $bootCompleted = adb shell getprop sys.boot_completed 2>$null
+          } while ($bootCompleted -ne "1")
+
           adb shell input keyevent 82
 
       # Step 5: Install Maestro CLI
       - name: Install Maestro CLI
-        run: curl -Ls https://get.maestro.mobile.dev | bash
+        run: iex ((New-Object System.Net.WebClient).DownloadString('https://get.maestro.mobile.dev'))
 
-      # Step 6: Install APK and run Maestro tests
+      # Step 6: Install APK & Run Maestro tests
       - name: Install APK & Run Maestro
-        shell: bash
+        shell: pwsh
         run: |
-          adb install -r app/build/outputs/apk/debug/app-debug.apk
-          ./scripts/run_maestro_simple.sh
+          adb install -r .\app\build\outputs\apk\debug\app-debug.apk
+          .\scripts\run_maestro_simple.ps1
 
       # Step 7: Stop emulator
       - name: Shutdown emulator
         if: always()
-        shell: bash
+        shell: pwsh
         run: adb emu kill
