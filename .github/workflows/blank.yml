@@ -22,14 +22,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # 2️⃣ Java
+      # 2️⃣ Java 17 (REQUIRED for modern Android SDK)
       - name: Set up Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
-          java-version: 11
+          java-version: 17
 
-      # 3️⃣ Enable KVM (CRITICAL for speed)
+      # 3️⃣ Enable KVM (critical for speed)
       - name: Enable KVM
         run: |
           sudo apt-get update
@@ -42,7 +42,7 @@ jobs:
           sudo mkdir -p $ANDROID_SDK_ROOT
           sudo chown -R $USER:$USER $ANDROID_SDK_ROOT
 
-          curl -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          curl -sS https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -o cmdline-tools.zip
           unzip -q cmdline-tools.zip
           mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
           mv cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
@@ -68,7 +68,7 @@ jobs:
             --device "pixel_8" \
             --force
 
-      # 6️⃣ Start Emulator (FAST FLAGS)
+      # 6️⃣ Start Emulator (FAST)
       - name: Start Emulator
         run: |
           export PATH=$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
@@ -82,7 +82,7 @@ jobs:
             -partition-size 4096 \
             -netdelay none \
             -netspeed full &
-          
+
           adb wait-for-device
           adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
           adb shell input keyevent 82
