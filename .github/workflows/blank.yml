@@ -12,23 +12,21 @@ jobs:
     timeout-minutes: 60
 
     env:
-      ANDROID_HOME: /usr/local/android-sdk
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
       AVD_NAME: Pixel_8
       MAESTRO_DRIVER_STARTUP_TIMEOUT: 60000
 
     steps:
-      # 1️⃣ Checkout code
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2️⃣ Setup Java
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: 11
 
-      # 3️⃣ Install Android SDK cmdline-tools and system images
+      # Install Android SDK cmdline-tools and system images
       - name: Install Android SDK
         run: |
           mkdir -p $ANDROID_HOME/cmdline-tools
@@ -36,7 +34,6 @@ jobs:
           unzip -q sdk-tools.zip -d $ANDROID_HOME/cmdline-tools
           mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
 
-          # Prepend Android SDK tools to PATH for this step
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
 
           # Accept licenses
@@ -45,34 +42,29 @@ jobs:
           # Install required packages
           sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "emulator" "platforms;android-36" "system-images;android-36;google_apis_playstore;x86_64"
 
-      # 4️⃣ Create and start emulator
+      # Create and boot emulator
       - name: Create and boot emulator
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
           
           echo "no" | avdmanager --sdk_root=$ANDROID_HOME create avd -n $AVD_NAME -k "system-images;android-36;google_apis_playstore;x86_64" --force
           
-          # Boot emulator headless
           $ANDROID_HOME/emulator/emulator -avd $AVD_NAME -no-window -no-audio -gpu swiftshader_indirect &
-          
-          # Wait for device to be ready
           $ANDROID_HOME/platform-tools/adb wait-for-device
-          
-          # Unlock the screen
           $ANDROID_HOME/platform-tools/adb shell input keyevent 82
 
-      # 5️⃣ Install Maestro CLI
+      # Install Maestro CLI
       - name: Install Maestro
         run: curl -Ls https://get.maestro.mobile.dev | bash
 
-      # 6️⃣ Install APK and run Maestro tests
+      # Install APK and run Maestro tests
       - name: Run Maestro tests
         run: |
           export PATH=$ANDROID_HOME/platform-tools:$PATH
           $ANDROID_HOME/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
           ./scripts/run_maestro_simple.sh
 
-      # 7️⃣ Kill emulator
+      # Stop emulator
       - name: Stop emulator
         if: always()
         run: |
