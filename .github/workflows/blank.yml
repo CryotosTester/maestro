@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 45
 
     env:
-      AVD_NAME: Pixel_8
+      AVD_NAME: Pixel_6_Pro
       ANDROID_API_LEVEL: 34
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -22,7 +22,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # 2️⃣ Java 17 (REQUIRED for modern Android SDK)
+      # 2️⃣ Java 17 (required)
       - name: Set up Java
         uses: actions/setup-java@v3
         with:
@@ -57,7 +57,7 @@ jobs:
             "platforms;android-${ANDROID_API_LEVEL}" \
             "system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64"
 
-      # 5️⃣ Create AVD
+      # 5️⃣ Create AVD (Pixel 6 Pro)
       - name: Create AVD
         run: |
           export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
@@ -65,10 +65,10 @@ jobs:
           avdmanager create avd \
             --name $AVD_NAME \
             --package "system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64" \
-            --device "pixel_8" \
+            --device pixel_6_pro \
             --force
 
-      # 6️⃣ Start Emulator (FAST)
+      # 6️⃣ Start Emulator (FAST FLAGS)
       - name: Start Emulator
         run: |
           export PATH=$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
@@ -93,13 +93,21 @@ jobs:
           curl -Ls https://get.maestro.mobile.dev | bash
           echo "$HOME/.maestro/bin" >> $GITHUB_PATH
 
-      # 8️⃣ Install APK + Run Maestro
+      # 8️⃣ Run Maestro tests
       - name: Run Maestro Tests
         run: |
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           maestro test .
 
-      # 9️⃣ Shutdown Emulator
+      # 9️⃣ Upload Maestro screenshots (optional but recommended)
+      - name: Upload Maestro screenshots
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: maestro-screenshots
+          path: /home/runner/.maestro/screenshots
+
+      # 🔟 Shutdown emulator
       - name: Stop Emulator
         if: always()
         run: |
