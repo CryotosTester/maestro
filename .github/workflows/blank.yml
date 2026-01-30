@@ -17,7 +17,7 @@ jobs:
       MAESTRO_DRIVER_STARTUP_TIMEOUT: 60000
 
     steps:
-      # 1️⃣ Checkout the repository
+      # 1️⃣ Checkout repository
       - name: Checkout code
         uses: actions/checkout@v3
 
@@ -45,20 +45,30 @@ jobs:
           # Install required packages
           sdkmanager "platform-tools" "emulator" "platforms;android-36" "system-images;android-36;google_apis_playstore;x86_64"
 
-      # 4️⃣ Create and boot the emulator (software-only)
+      # 4️⃣ Create and boot emulator (software-only)
       - name: Create and boot emulator
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
           export ANDROID_SDK_ROOT=$ANDROID_HOME
 
-          # Create the AVD (x86_64 image)
+          # Create the AVD
           echo "no" | avdmanager create avd -n $AVD_NAME -k "system-images;android-36;google_apis_playstore;x86_64" --force
 
-          # Boot emulator in software-only mode (disable KVM)
-          $ANDROID_HOME/emulator/emulator -avd $AVD_NAME -no-window -no-audio -gpu swiftshader_indirect -accel off &
-          
-          # Wait until device is ready
+          # Boot emulator in software-only mode, disable snapshots
+          $ANDROID_HOME/emulator/emulator -avd $AVD_NAME -no-window -no-audio -gpu swiftshader_indirect -accel off -no-snapshot-load -no-snapshot-save &
+
+          # Wait until adb device is online
           $ANDROID_HOME/platform-tools/adb wait-for-device
+
+          # Wait until emulator is fully booted
+          BOOT_COMPLETE=$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed | tr -d '\r')
+          while [ "$BOOT_COMPLETE" != "1" ]; do
+            echo "Waiting for emulator to boot..."
+            sleep 5
+            BOOT_COMPLETE=$($ANDROID_HOME/platform-tools/adb shell getprop sys.boot_completed | tr -d '\r')
+          done
+
+          # Unlock screen
           $ANDROID_HOME/platform-tools/adb shell input keyevent 82
 
       # 5️⃣ Install Maestro CLI
@@ -69,9 +79,9 @@ jobs:
       - name: Run Maestro tests
         run: |
           export PATH=$ANDROID_HOME/platform-tools:$PATH
-          # Install your debug APK
+          # Install your debug APK (update path if needed)
           $ANDROID_HOME/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
-          # Run your Maestro script (adjust path if needed)
+          # Run your Maestro script
           ./scripts/run_maestro_simple.sh
 
       # 7️⃣ Stop emulator (cleanup)
