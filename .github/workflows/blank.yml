@@ -1,4 +1,4 @@
-name: Linux Android Emulator + Maestro Tests (Hardened & Fast)
+name: Android Emulator + Maestro (CI)
 
 on:
   push:
@@ -20,11 +20,11 @@ jobs:
 
     steps:
       # 1️⃣ Checkout
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
       # 2️⃣ Java 17
-      - name: Set up Java
+      - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
@@ -49,7 +49,6 @@ jobs:
           mv cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
 
           export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
-
           yes | sdkmanager --licenses
 
           sdkmanager \
@@ -58,12 +57,17 @@ jobs:
             "platforms;android-${ANDROID_API_LEVEL}" \
             "system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64"
 
-      # 5️⃣ Create AVD
+      # 5️⃣ Persist PATH (CRITICAL)
+      - name: Add Android tools to PATH
+        run: |
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+          echo "$ANDROID_SDK_ROOT/emulator" >> $GITHUB_PATH
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+
+      # 6️⃣ Create AVD
       - name: Create AVD
         run: |
           mkdir -p $ANDROID_AVD_HOME
-
-          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
 
           avdmanager create avd \
             --name "$AVD_NAME" \
@@ -71,14 +75,11 @@ jobs:
             --device pixel_6_pro \
             --force
 
-          echo "Available AVDs:"
           emulator -list-avds
 
-      # 6️⃣ Start Emulator (HARDENED)
+      # 7️⃣ Start Emulator (HARDENED)
       - name: Start Emulator
         run: |
-          export PATH=$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
-
           emulator -avd "$AVD_NAME" \
             -no-window \
             -no-audio \
@@ -91,7 +92,7 @@ jobs:
             -skip-adb-auth \
             -read-only &
 
-          echo "Waiting for emulator to be ready..."
+          echo "Waiting for emulator..."
 
           BOOT_TIMEOUT=180
           START_TIME=$(date +%s)
@@ -103,12 +104,11 @@ jobs:
             BOOT_ANIM=$(adb shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')
 
             if [[ "$BOOT_COMPLETED" == "1" && "$BOOT_ANIM" == "stopped" ]]; then
-              echo "✅ Emulator fully booted"
+              echo "✅ Emulator ready"
               break
             fi
 
-            NOW=$(date +%s)
-            if (( NOW - START_TIME > BOOT_TIMEOUT )); then
+            if (( $(date +%s) - START_TIME > BOOT_TIMEOUT )); then
               echo "❌ Emulator boot timeout"
               adb devices
               exit 1
@@ -119,19 +119,34 @@ jobs:
 
           adb shell input keyevent 82
 
-      # 7️⃣ Install Maestro
+      # 8️⃣ Verify adb
+      - name: Verify adb & device
+        run: |
+          adb version
+          adb devices
+
+      # 9️⃣ Install Maestro
       - name: Install Maestro
         run: |
           curl -Ls https://get.maestro.mobile.dev | bash
           echo "$HOME/.maestro/bin" >> $GITHUB_PATH
 
-      # 8️⃣ Run Maestro tests
-      - name: Run Maestro Tests
+      # 🔟 Install APK + Run Maestro
+      - name: Install APK & Run Maestro
         run: |
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           maestro test .
 
-      # 9️⃣ Upload Maestro screenshots
+      # 1️⃣1️⃣ Upload APK (PRIVATE)
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      # 1️⃣2️⃣ Upload Maestro Screenshots
       - name: Upload Maestro screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -139,8 +154,7 @@ jobs:
           name: maestro-screenshots
           path: /home/runner/.maestro/screenshots
 
-      # 🔟 Shutdown emulator
+      # 1️⃣3️⃣ Stop Emulator
       - name: Stop Emulator
         if: always()
-        run: |
-          adb emu kill || true
+        run: adb emu kill || true
