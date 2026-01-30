@@ -17,7 +17,7 @@ jobs:
       MAESTRO_DRIVER_STARTUP_TIMEOUT: 60000
 
     steps:
-      # 1️⃣ Checkout code
+      # 1️⃣ Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v3
 
@@ -28,7 +28,7 @@ jobs:
           distribution: temurin
           java-version: 11
 
-      # 3️⃣ Install Android SDK cmdline-tools and system images
+      # 3️⃣ Install Android SDK and system images
       - name: Install Android SDK
         run: |
           mkdir -p $ANDROID_HOME/cmdline-tools
@@ -45,22 +45,20 @@ jobs:
           # Install required packages
           sdkmanager "platform-tools" "emulator" "platforms;android-36" "system-images;android-36;google_apis_playstore;x86_64"
 
-      # 4️⃣ Create and boot emulator
+      # 4️⃣ Create and boot the emulator (software-only)
       - name: Create and boot emulator
         run: |
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$PATH
           export ANDROID_SDK_ROOT=$ANDROID_HOME
 
-          # Create AVD
+          # Create the AVD (x86_64 image)
           echo "no" | avdmanager create avd -n $AVD_NAME -k "system-images;android-36;google_apis_playstore;x86_64" --force
 
-          # Boot emulator headless
-          $ANDROID_HOME/emulator/emulator -avd $AVD_NAME -no-window -no-audio -gpu swiftshader_indirect &
+          # Boot emulator in software-only mode (disable KVM)
+          $ANDROID_HOME/emulator/emulator -avd $AVD_NAME -no-window -no-audio -gpu swiftshader_indirect -accel off &
           
-          # Wait for device to be ready
+          # Wait until device is ready
           $ANDROID_HOME/platform-tools/adb wait-for-device
-          
-          # Unlock the emulator screen
           $ANDROID_HOME/platform-tools/adb shell input keyevent 82
 
       # 5️⃣ Install Maestro CLI
@@ -71,10 +69,12 @@ jobs:
       - name: Run Maestro tests
         run: |
           export PATH=$ANDROID_HOME/platform-tools:$PATH
+          # Install your debug APK
           $ANDROID_HOME/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
+          # Run your Maestro script (adjust path if needed)
           ./scripts/run_maestro_simple.sh
 
-      # 7️⃣ Stop emulator
+      # 7️⃣ Stop emulator (cleanup)
       - name: Stop emulator
         if: always()
         run: |
