@@ -1,4 +1,4 @@
-name: Linux Android Emulator + Maestro Tests (Fast)
+name: Linux Android Emulator + Maestro Tests (Hardened & Fast)
 
 on:
   push:
@@ -16,27 +16,28 @@ jobs:
       ANDROID_API_LEVEL: 34
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_AVD_HOME: /home/runner/.android/avd
 
     steps:
       # 1️⃣ Checkout
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # 2️⃣ Java 17 (required for modern Android SDK)
+      # 2️⃣ Java 17
       - name: Set up Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: 17
 
-      # 3️⃣ Enable KVM (critical for speed)
+      # 3️⃣ Enable KVM
       - name: Enable KVM
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils
           sudo chmod 666 /dev/kvm
 
-      # 4️⃣ Install Android SDK + Emulator
+      # 4️⃣ Install Android SDK
       - name: Install Android SDK
         run: |
           sudo mkdir -p $ANDROID_SDK_ROOT
@@ -57,23 +58,28 @@ jobs:
             "platforms;android-${ANDROID_API_LEVEL}" \
             "system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64"
 
-      # 5️⃣ Create AVD (Pixel 6 Pro)
+      # 5️⃣ Create AVD
       - name: Create AVD
         run: |
+          mkdir -p $ANDROID_AVD_HOME
+
           export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
 
           avdmanager create avd \
-            --name $AVD_NAME \
+            --name "$AVD_NAME" \
             --package "system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64" \
             --device pixel_6_pro \
             --force
 
-      # 6️⃣ Start Emulator (FAST FLAGS)
+          echo "Available AVDs:"
+          emulator -list-avds
+
+      # 6️⃣ Start Emulator (HARDENED)
       - name: Start Emulator
         run: |
           export PATH=$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
 
-          emulator -avd $AVD_NAME \
+          emulator -avd "$AVD_NAME" \
             -no-window \
             -no-audio \
             -gpu swiftshader_indirect \
@@ -81,10 +87,36 @@ jobs:
             -memory 4096 \
             -partition-size 4096 \
             -netdelay none \
-            -netspeed full &
+            -netspeed full \
+            -skip-adb-auth \
+            -read-only &
+
+          echo "Waiting for emulator to be ready..."
+
+          BOOT_TIMEOUT=180
+          START_TIME=$(date +%s)
 
           adb wait-for-device
-          adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
+
+          while true; do
+            BOOT_COMPLETED=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            BOOT_ANIM=$(adb shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')
+
+            if [[ "$BOOT_COMPLETED" == "1" && "$BOOT_ANIM" == "stopped" ]]; then
+              echo "✅ Emulator fully booted"
+              break
+            fi
+
+            NOW=$(date +%s)
+            if (( NOW - START_TIME > BOOT_TIMEOUT )); then
+              echo "❌ Emulator boot timeout"
+              adb devices
+              exit 1
+            fi
+
+            sleep 5
+          done
+
           adb shell input keyevent 82
 
       # 7️⃣ Install Maestro
