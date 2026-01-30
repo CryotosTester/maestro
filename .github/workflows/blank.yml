@@ -1,105 +1,106 @@
-name: Windows Android Emulator + Maestro Tests
+name: Linux Android Emulator + Maestro Tests (Fast)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
-  run_android_emulator:
-    runs-on: windows-latest
-    timeout-minutes: 60
+  android-maestro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     env:
       AVD_NAME: Pixel_8
       ANDROID_API_LEVEL: 34
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
 
     steps:
-      # Step 1: Checkout code
+      # 1️⃣ Checkout
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Step 2: Setup Java
-      - name: Setup Java
+      # 2️⃣ Java
+      - name: Set up Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: 11
 
-      # Step 3: Set ANDROID_SDK_ROOT
-      - name: Set ANDROID_SDK_ROOT
-        shell: pwsh
+      # 3️⃣ Enable KVM (CRITICAL for speed)
+      - name: Enable KVM
         run: |
-          echo "ANDROID_SDK_ROOT=${{ runner.temp }}\android-sdk" >> $env:GITHUB_ENV
-          echo "ANDROID_HOME=${{ runner.temp }}\android-sdk" >> $env:GITHUB_ENV
+          sudo apt-get update
+          sudo apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils
+          sudo chmod 666 /dev/kvm
 
-      # Step 4: Install Android SDK command-line tools & system images
-      - name: Install Android SDK & System Images
-        shell: pwsh
+      # 4️⃣ Install Android SDK + Emulator
+      - name: Install Android SDK
         run: |
-          $sdkRoot = $Env:ANDROID_SDK_ROOT
-          mkdir -Force "$sdkRoot\cmdline-tools"
+          sudo mkdir -p $ANDROID_SDK_ROOT
+          sudo chown -R $USER:$USER $ANDROID_SDK_ROOT
 
-          Invoke-WebRequest `
-            https://dl.google.com/android/repository/commandlinetools-win-9477386_latest.zip `
-            -OutFile cmdline-tools.zip
+          curl -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q cmdline-tools.zip
+          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+          mv cmdline-tools $ANDROID_SDK_ROOT/cmdline-tools/latest
 
-          Expand-Archive cmdline-tools.zip -DestinationPath "$sdkRoot\cmdline-tools"
-          Rename-Item "$sdkRoot\cmdline-tools\cmdline-tools" "$sdkRoot\cmdline-tools\latest"
+          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
 
-          $Env:PATH="$sdkRoot\cmdline-tools\latest\bin;$sdkRoot\emulator;$sdkRoot\platform-tools;$Env:PATH"
+          yes | sdkmanager --licenses
 
-          yes | sdkmanager.bat --licenses
+          sdkmanager \
+            "platform-tools" \
+            "emulator" \
+            "platforms;android-${ANDROID_API_LEVEL}" \
+            "system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64"
 
-          sdkmanager.bat `
-            "platform-tools" `
-            "emulator" `
-            "platforms;android-$Env:ANDROID_API_LEVEL" `
-            "system-images;android-$Env:ANDROID_API_LEVEL;google_apis_playstore;x86_64"
-
-      # Step 5: Create and launch emulator
-      - name: Create and launch emulator
-        shell: pwsh
+      # 5️⃣ Create AVD
+      - name: Create AVD
         run: |
-          $sdkRoot = $Env:ANDROID_SDK_ROOT
-          $Env:PATH="$sdkRoot\cmdline-tools\latest\bin;$sdkRoot\emulator;$sdkRoot\platform-tools;$Env:PATH"
+          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
 
-          avdmanager.bat create avd `
-            -n "$Env:AVD_NAME" `
-            -k "system-images;android-$Env:ANDROID_API_LEVEL;google_apis_playstore;x86_64" `
+          avdmanager create avd \
+            --name $AVD_NAME \
+            --package "system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64" \
+            --device "pixel_8" \
             --force
 
-          Start-Process `
-            -NoNewWindow `
-            -FilePath "$sdkRoot\emulator\emulator.exe" `
-            -ArgumentList "-avd $Env:AVD_NAME -no-window -no-audio -gpu swiftshader_indirect"
+      # 6️⃣ Start Emulator (FAST FLAGS)
+      - name: Start Emulator
+        run: |
+          export PATH=$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$PATH
 
-          do {
-            Start-Sleep -Seconds 5
-            $boot = adb shell getprop sys.boot_completed 2>$null
-          } while ($boot -ne "1")
-
+          emulator -avd $AVD_NAME \
+            -no-window \
+            -no-audio \
+            -gpu swiftshader_indirect \
+            -no-boot-anim \
+            -memory 4096 \
+            -partition-size 4096 \
+            -netdelay none \
+            -netspeed full &
+          
+          adb wait-for-device
+          adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
           adb shell input keyevent 82
 
-      # Step 6: Install Maestro CLI
-      - name: Install Maestro CLI
-        shell: pwsh
+      # 7️⃣ Install Maestro
+      - name: Install Maestro
         run: |
-          iex ((New-Object System.Net.WebClient).DownloadString('https://get.maestro.mobile.dev'))
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> $GITHUB_PATH
 
-      # Step 7: Install APK & Run Maestro tests
-      - name: Install APK & Run Maestro
-        shell: pwsh
+      # 8️⃣ Install APK + Run Maestro
+      - name: Run Maestro Tests
         run: |
-          adb install -r .\app\build\outputs\apk\debug\app-debug.apk
-          .\scripts\run_maestro_simple.ps1
+          adb install -r app/build/outputs/apk/debug/app-debug.apk
+          maestro test .
 
-      # Step 8: Shutdown emulator
-      - name: Shutdown emulator
+      # 9️⃣ Shutdown Emulator
+      - name: Stop Emulator
         if: always()
-        shell: pwsh
         run: |
-          adb emu kill
+          adb emu kill || true
